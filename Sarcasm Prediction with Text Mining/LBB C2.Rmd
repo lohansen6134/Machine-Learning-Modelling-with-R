@@ -1,0 +1,225 @@
+---
+title: "News Sarcams Detection"
+author: "Lohansen"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+```{r}
+library(rjson)
+library(jsonlite)
+library(tidyverse)
+library(tm)
+library(e1071)
+library(caret)
+library(ROCR)
+```
+
+# Briefs
+In this LBB, I want to make a sarcasm detector using modeling naivebayes machine learning to predict whether a headline written is sarcasm or not. The dataset I use is **News Headlines dataset for Sarcasm Detection** which is data taken from comments from the news website **The Onion** and **HuffPost**
+
+dataset ini berasal dari https://www.kaggle.com/rmisra/news-headlines-dataset-for-sarcasm-detection. Each record consists of three attributes:
+
+- is_sarcastic: 1 if the record is sarcastic otherwise 0
+- headline: the headline of the news article
+- article_link: link to the original news article. Useful in collecting supplementary data
+
+# Read Data
+
+```{r}
+data2 <- file("news-headlines-dataset-for-sarcasm-detection/Sarcasm_Headlines_Dataset_v2.json") %>% 
+  stream_in()
+```
+
+```{r}
+sarcasm <- data2 %>% 
+  select("label" = is_sarcastic, "text" = headline) %>% 
+  mutate("label" = as.factor(label))
+
+sarcasm <- sarcasm[1:7000,]
+
+head(sarcasm)
+```
+
+
+# Data Manipulation (Text-Mining)
+
+### STEP 1 : Convert text to corpus
+
+```{r}
+sarcasm.corpus <- VCorpus(VectorSource(sarcasm$text))
+```
+
+
+### STEP 2 : Text Prepocesing
+1. Convert all text to lower case 
+
+```{r}
+sarcasm.corpus <- tm_map(sarcasm.corpus, content_transformer(tolower))
+```
+
+2. Remove 'stopwords' and numbers
+
+```{r}
+sarcasm.corpus <- tm_map(sarcasm.corpus, removeNumbers)
+sarcasm.corpus <- tm_map(sarcasm.corpus, removeWords, stopwords("english"))
+```
+
+3. Remove common punctuations
+
+```{r}
+sarcasm.corpus <- tm_map(sarcasm.corpus, removePunctuation)
+```
+
+4. Replace special symbol/punctuation with a white space (Skip)
+
+5. Stemming
+
+```{r}
+sarcasm.corpus <- tm_map(sarcasm.corpus, stemDocument)
+```
+
+
+### STEP 3 : Tokenization
+
+```{r}
+sarcasm.dtm <- DocumentTermMatrix(sarcasm.corpus)
+sarcasm.dtm
+
+inspect(sarcasm.dtm)
+```
+
+Interpretation :
+an inspection conducted on the corpus sarcasm data that was changed with the `DocumentTermMatrix` function showed the 10 most used words in 7000 news headlines taken from this data
+
+these are the word with minimum 200x have used in comment on this data
+```{r}
+findFreqTerms(sarcasm.dtm, 200)
+```
+
+
+### Step 4 : Cross-Validation
+
+First, let split the train-test for the predictor only.
+
+```{r}
+set.seed(100)
+
+index <- sample(1:nrow(sarcasm.dtm), 0.80*nrow(sarcasm.dtm))
+
+sarcasm_train <- sarcasm.dtm[index,]
+sarcasm_test <- sarcasm.dtm[-index,]
+```
+
+split the sarcasm label
+
+```{r}
+train_label <- sarcasm[index,1]
+test_label <- sarcasm[-index,1]
+```
+
+```{r}
+# All ...
+sarcasm_freq <- findFreqTerms(sarcasm.dtm, 20)
+
+sarcasm_train <- sarcasm_train[,sarcasm_freq]
+sarcasm_test <- sarcasm_test[,sarcasm_freq]
+```
+
+
+### STEP 6 : Convert to 0 and 1
+
+```{r}
+bernoulli_conv <- function(x){
+  x <- as.factor(ifelse(x > 0, 1, 0))
+}
+```
+
+```{r}
+train_bn <- apply(sarcasm_train, 2, bernoulli_conv)
+
+test_bn <- apply(sarcasm_test, 2, bernoulli_conv)
+```
+
+
+### STEP 7 : Modelling
+
+Create Naive-Bayes Classifier here, using laplace=1
+```{r}
+sarcasm_model <- naiveBayes(x = train_bn, y = train_label)
+sarcasm_predict <- predict(sarcasm_model, test_bn, type = "class")
+```
+
+
+### STEP 8 : COnfusion Matrix
+
+```{r}
+confusionMatrix(
+  data = sarcasm_predict, 
+  reference = test_label,
+  dnn = c("Prediksi", "Aktual"),
+  positive = "0")
+```
+
+Interpretation :
+The sarcasm_model I made above using naivebayes only managed to get an accuracy rate of 66%, a recall of 70% and a precision of 68%. there is an error that occurs in predictions in this machine learning model by 33%, for that I want to develop this model so that it is smarter to be able to predict news headline that are sarcasm but predicted not sarcasm, that's why in that case I want to increase the **Precision** value by increasing the threshold value. 
+
+
+### STEP 9 : Evaluating and Improving
+
+```{r}
+sarcasm_prediction_raw <- predict(sarcasm_model, test_bn, type = "raw")
+head(sarcasm_prediction_raw)
+```
+
+treshold : 0.3
+```{r}
+sarcasm.predict2 <- as.factor(ifelse(sarcasm_prediction_raw[,2] >= 0.3, 1, 0))
+```
+
+```{r}
+confusionMatrix(
+  data = sarcasm.predict2, 
+  reference = test_label,
+  dnn = c("Prediksi", "Aktual"),
+  positive = "0")
+```
+
+Interpretation :
+when the treshold of the first model is lowered from default (0.5) to 0.3, there is a significant increase in the value of precision which makes this model smarter in predicting headlines containing sarcasm. the error value in the prediction of the headline false positive rate also improved significantly which reduced it to only 89 errors.
+
+
+### STEP 10 : checking the ROC
+
+As the requirement of ROC curve, I provide our model prediction and the actual class.
+
+```{r}
+sarcasm_df <- data.frame("prediction"=sarcasm_prediction_raw[,2], "trueclass"=as.numeric(test_label=="0"))
+head(sarcasm_df)
+```
+
+ROC curve is a plot of Sensitivity respect to Loss of Specificity given all possible threshold.
+
+```{r}
+sarcasm_roc <- prediction(sarcasm_df$prediction, sarcasm_df$trueclass)  
+plot(performance(sarcasm_roc, "tpr", "fpr"))
+```
+
+Interpretation :
+ROC is one of the additional evaluations used to assess whether this model has a good significance level or not. in the ROC test this time, it appears that the results obtained are very much less than they should be, the ROC plot above indicates that if you want to increase the True Positive Rate, it requires considerable struggle, because there is a large gap every increase in the True Positive Rate against False Positive Rate. for that I consider that this model is not suitable for use, moreover this model has a level of accuracy that is not good only around 60% -65% (although the treshold has been changed). this is probably due to this model using text mining prepocessing with the TM basic library so that the results obtained are not significant. for that the solution is to try another method like **tidytext bigrams** or the **lematization** method to get better results.
+
+
+Conclusion :
+Through this text mining prediction model, I want to create a machine learning that can predict whether headlines on news websites contain sarcasm or not. This prediction model can be used for the needs of news portal companies to sort headlines like this and make further improvements.
+
+After testing the sarcasm prediction model, I found that there was a significant lack of accuracy in this model so that it was not suitable for use, because this model was made with basic TM prepocessing which could only use one word as terms, unable to interpret words words that have opposite meanings. For this reason, it is need other libraries such as tidytext bigrams or lematization for the development of this model to make it better.
+
+
+
+
+
+
+
