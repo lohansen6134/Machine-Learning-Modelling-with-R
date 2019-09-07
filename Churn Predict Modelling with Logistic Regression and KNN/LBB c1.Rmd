@@ -1,0 +1,278 @@
+---
+title: "Churn Preditive ML Modelling"
+author: "Lohansen"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+# LBB Report 
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(inspectdf)
+library(caret)
+library(MASS)
+library(plotly)
+library(class)
+```
+
+## Import data
+
+Data yang akan saya gunakan pada LBB classification 1 ini adalah data churn modelling yang saya dapat melalui kaggle (https://www.kaggle.com/shrutimechlearn/churn-modelling), data ini berisikan data-data rincian pelanggan bank dan variabel target adalah variabel biner yang mencerminkan fakta apakah pelanggan meninggalkan bank (menutup akunnya) atau dia terus menjadi pelanggan.
+
+
+Variabel data :
+
+CustomerIdUnique: Id untuk identifikasi nasabah bank
+
+Surname: Nama belakang pelanggan
+
+CreditScore: Skor kredit pelanggan
+
+Geografi: Negara tempat pelanggan berada
+
+Gender: Pria atau Wanita
+
+Age: Umur pelanggan
+
+Tenure: Jumlah tahun di mana pelanggan telah berada di bank
+
+Saldo: Saldo bank pelanggan
+
+NumOfProducts: Jumlah produk bank yang digunakan pelanggan
+
+HasCrCard: apakah pelanggan memegang kartu kredit dengan bank atau tidak
+
+IsActiveMember: apakah pelanggan adalah anggota aktif dengan bank atau tidak
+
+Estimated : Gaji Taksiran gaji pelanggan dalam Dolar
+
+Exited: 1 jika pelanggan menutup akun dengan bank dan 0 jika pelanggan dipertahankan
+
+```{r}
+churn <- read.csv("churn-modelling/Churn_Modelling.csv")
+glimpse(churn)
+```
+
+```{r}
+churn <- churn %>% 
+  select(-c(RowNumber, CustomerId, Surname, Geography)) %>% 
+  mutate(Exited = as.factor(Exited))
+
+head(churn)
+```
+
+
+## Inspect Data
+
+Check missing value
+```{r}
+colSums(is.na(churn))
+```
+
+Exploratory data
+```{r}
+cat <- inspect_cat(churn)
+num <- inspect_num(churn)
+
+show_plot(num); show_plot(cat)
+```
+
+Check proportion of target variabel
+```{r}
+prop.table(table(churn$Exited))
+```
+
+
+## Cross Validation
+
+```{r}
+set.seed(417)
+index <- sample(nrow(churn), nrow(churn)*0.7)
+train_churn <- churn[index, ]
+test_churn <- churn[-index, ]
+```
+
+```{r}
+prop.table(table(train_churn$Exited))
+```
+
+
+balancing the proportion
+
+```{r}
+glimpse(train_churn)
+
+train_churn.new <- upSample(x = train_churn[, -11],
+                            y = train_churn$Exited,
+                            yname = "Exited")
+
+prop.table(table(train_churn.new$Exited))
+```
+
+menggunakan upsample karena saat menggunakan downsample observasi berkurang menjadi 2000 data
+
+
+## Modelling from data train
+
+```{r}
+churn_model1 <- glm(Exited ~., train_churn.new, family = "binomial")
+
+summary(churn_model1)
+```
+
+## Interpretation 
+
+Is Active member
+```{r}
+exp(-0.8763111832)
+```
+interpretasi :
+memlalui nilai odds ratio diatas dapat diketahui bahwa user yang merupakan active member memiliki kemungkinan untuk exited 0.4x lebih kecil dibandingkan user yang bukan active member
+
+
+Stepping the model
+
+```{r}
+stepAIC(churn_model1, direction = "backward")
+```
+
+```{r}
+churn_model2 <- glm(formula = Exited ~ CreditScore + Gender + Age + 
+    Balance + NumOfProducts + IsActiveMember + EstimatedSalary, 
+    family = "binomial", data = train_churn.new)
+```
+
+
+# Predicting to data test (logisitic regression)
+
+#### Model1 (all variables)
+
+```{r}
+test_churn$prob <- predict(churn_model1, test_churn, type = "response")
+
+head(test_churn)
+```
+
+
+menentukan threshold dari probabilty
+```{r}
+hist(test_churn$prob)
+```
+
+threshold = 0.5
+```{r}
+test_churn$predict <- as.factor(ifelse(test_churn$prob >= 0.5, 1, 0))
+
+head(test_churn)
+```
+
+
+#### Model2 (stepAIC)
+```{r}
+test_churn$prob2 <- predict(churn_model2, test_churn, type = "response")
+
+head(test_churn)
+```
+
+threshold = 0.5
+```{r}
+test_churn$predict2 <- as.factor(ifelse(test_churn$prob2 >= 0.5, 1, 0))
+
+head(test_churn)
+```
+
+
+## Evaluating
+
+Model1
+```{r}
+confusionMatrix(test_churn$predict, test_churn$Exited, positive = "1")
+```
+
+Model2
+```{r}
+confusionMatrix(test_churn$predict2, test_churn$Exited, positive = "1")
+```
+
+Note： 
+Model1 dan model2 memiliki nilai yang hampir sama, tetapi terdapat sedikit perbedaan pada model2 dimana nilai accuracy dan precision yang sedikit lebih tinggi dibandingkan dengan model1, ini mempengaruhi model2 menjadi lebih pintar untuk menebak prediksi churn rate untuk customer yang tidak exited atau tetap menggunakan produk perusahaan
+
+
+# Predicting to data test (KNN)
+
+```{r}
+churn.n <- churn %>% 
+  mutate_if(is.numeric, scale) %>% 
+  select(-Gender)
+```
+
+## cross validation
+
+```{r}
+index2 <- sample(nrow(churn.n), nrow(churn.n)*0.7)
+train_churn.n <- churn.n[index2,]
+test_churn.n <- churn.n[-index2,]
+```
+
+## sampling data
+
+```{r}
+glimpse(train_churn.n)
+
+train_churn.n <- upSample(x = train_churn.n[, -11],
+                          y = train_churn.n$Exited,
+                          yname = "Exited")
+
+prop.table(table(train_churn.n$Exited))
+```
+
+
+## Modelling
+
+```{r}
+sqrt(nrow(train_churn.n))
+```
+
+k = 83
+```{r}
+pred_knn <- knn(train = train_churn.n[, -10],
+                test = test_churn.n[, -10], 
+                cl = train_churn.n$Exited, 
+                k = 83)
+```
+
+k = 81
+```{r}
+pred_knn2 <- knn(train = train_churn.n[, -10],
+                 test = test_churn.n[, -10], 
+                 cl = train_churn.n$Exited, 
+                 k = 81)
+```
+
+
+## Evaluating
+
+k = 83
+```{r}
+confusionMatrix(pred_knn, test_churn.n$Exited, positive = "0")
+```
+
+k = 81
+```{r}
+confusionMatrix(pred_knn2, test_churn.n$Exited, positive = "0")
+```
+
+
+# Result 
+ 
+berdasarkan hasil evaluasi, maka saya menyimpulkan bahwa model churn prediction yang menggunakan KNN modelling memiliki tingkat ketepatan yang lebih baik dibaningkan dengan logistic regression. 
+
+Nilai akurasi yang dihasilkan oleh model dengan logistic regression baik model1 dan model2 (treshold = 5), hanya mendapatkan tingkat akurasi model di kisaran angka 70%, recall di kisaran angka 68% dan precision di kisaran angka 36%, membuat banyak prediksi yang salah dan berlawanan dengan actual. 
+
+Di sisi lain ketepatan model menggunakan KNN modelling mendapatkan nilai accuracy di angka 94%, recall 95% dan precision 97%, jauh diatas nilai model logistic. terlebih lagi churn prediction yang saya buat ini diharapkan dapat meningkatkan nilai precision agar dapat mengurangi resiko memprediksi customer tidak akan exited, padahal di kenyataan atau actual customer akan melakukan exited yang akan menimbulkan kerugian besar bagi perusahaan.
+
+untuk itulah melalui uji coba ini, saya merekomendasikan untuk menggunakan **model KNN dengan k = 81** karena memiliki tingkat akurasi yang sedikit lebih tinggi dibandingkan k = 83.
