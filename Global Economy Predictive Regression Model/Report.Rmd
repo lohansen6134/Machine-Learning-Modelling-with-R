@@ -1,0 +1,185 @@
+---
+title: "Economic freedom Index Regression Model"
+author: "Lohansen"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+# Read Data
+```{r}
+library(tidyverse)
+library(dplyr)
+library(lmtest)
+library(car)
+```
+
+```{r}
+df <- read_csv("economic_freedom_index2019_data.csv")
+head(df)
+```
+
+### data manipulation
+Selecting only the freedom index from the economic freedom data
+```{r}
+freedom <- df %>% 
+  select(`Financial Freedom`, `Investment Freedom`, `Business Freedom`, `Labor Freedom`, `Monetary\ Freedom`, `Trade Freedom`)
+freedom
+```
+
+changing the type of index into numeric data
+```{r}
+freedom$`Financial Freedom` = as.numeric(freedom$`Financial Freedom`)
+freedom$`Investment Freedom` = as.numeric(freedom$`Investment Freedom`)
+freedom$`Business Freedom` = as.numeric(freedom$`Business Freedom`)
+freedom$`Labor Freedom` = as.numeric(freedom$`Labor Freedom`)
+freedom$`Monetary Freedom` = as.numeric(freedom$`Monetary Freedom`)
+freedom$`Trade Freedom` = as.numeric(freedom$`Trade Freedom`)
+```
+
+checking the missing value
+```{r}
+colSums(is.na(freedom))
+```
+
+deleting the missing value with drop_na function
+```{r}
+freedom <- freedom %>% 
+  drop_na(`Financial Freedom`, `Business Freedom`)
+colSums(is.na(freedom))
+```
+
+checking the data correlation
+```{r}
+library(GGally)
+ggcorr(freedom, label = T,label_size = 2, hjust = .8)
+```
+
+Note : 
+From the correlation plot above, it can be seen that the peace indexes in the data have a significant correlation, all correlation values are above 0 ang, indicating that any increase in one index will have the same effect on **financial freedom**
+
+
+### modeling
+make a original model that using all the index be a predictor to `Financial Freedom`
+```{r}
+model_ori <- lm(`Financial Freedom` ~., freedom)
+```
+
+steping the model
+```{r}
+step(model_ori, direction = "backward")
+```
+
+steps model recommendation
+```{r}
+model_rec <- lm(formula = `Financial Freedom` ~ `Investment Freedom` + `Business Freedom` + 
+    `Trade Freedom`, data = freedom)
+```
+
+checking the adjusted r squared score of both model
+```{r}
+summary(model_ori)$adj.r.squared
+summary(model_rec)$adj.r.squared
+```
+
+checking the model
+```{r}
+summary(model_ori)
+```
+
+```{r}
+summary(model_rec)
+```
+
+Note :
+when we perform the `step` function on the original model (using all indexes), the system removes ** labor freedom ** and ** monetary freedom **. It can be seen in the `summary that both indexes have significant coefficients that are not related to financial freedom, so they are automatically removed by the system. after eliminating the increase in the adjusted r square value in the recommended model.
+
+but when viewed from the perspective of business wise, both labor freedom and monetary freedom are one of the indications that variables cannot be left out of consideration of a country's financial freedom conditions. policies taken by a country to tackle monetary problems can affect the country's economic conditions, as well as labor policies taken by the state.
+
+Therefore we decided not to draw conclusions first, and felt it was better to see the results of the tests of these two models first both for the original model that uses all variables and the system recommendation model that eliminates 2 variables that do not have a non-significant correlation coefficient relationship
+
+
+### ploting the model
+we using the the plot function to see the leverage and influence spot in our model
+```{r}
+plot(model_ori)
+```
+
+```{r}
+plot(model_rec)
+```
+
+### Model Testing
+Homoschedaticity test
+```{r}
+bptest(model_ori)
+bptest(model_rec)
+```
+
+Note :
+both the original model (using all variables) and the recommendation model, both have p-values> 0.05, which indicates that both of these models have passed the homoschedaticity test
+
+
+Shapiro Test
+```{r}
+shapiro.test(model_ori$residuals)
+shapiro.test(model_rec$residuals)
+```
+
+Note :
+In the Shapiro test, the original model got a p-value slightly above 0.05 and was declared to have passed the test, but for the recommended model it obtained a p-value of 0.049 which was slightly below the 0.05 standard so that it was declared not to pass the Shapiro test, shows that there are abnormalities in the linear correlation of recommendation models
+
+
+Normality test (density test)
+```{r}
+plot(density(model_ori$residuals))
+```
+
+```{r}
+plot(density(model_rec$residuals))
+```
+
+
+Linearity
+```{r}
+colSums(is.na(freedom))
+```
+
+
+```{r}
+# `Financial Freedom`, `Investment Freedom`, `Business Freedom`, `Labor Freedom`, `Monetary Freedom`, `Trade Freedom`
+cor.test(freedom$`Financial Freedom`, freedom$`Investment Freedom`)
+cor.test(freedom$`Financial Freedom`, freedom$`Business Freedom`)
+cor.test(freedom$`Financial Freedom`, freedom$`Labor Freedom`)
+cor.test(freedom$`Financial Freedom`, freedom$`Monetary Freedom`)
+cor.test(freedom$`Financial Freedom`, freedom$`Trade Freedom`)
+```
+
+Note :
+after running the test, all variables taken from the data have a significant linear correlation to `financial freedom` as indicated by the p-value <0.05 obtained from each of the tests
+
+
+multilinearity
+```{r}
+vif(model_ori)
+vif(model_rec)
+```
+
+Note :
+In the multilinearity test, the VIF (Variance Inflation Factor) value obtained by each variable gets a value <10, this indicates that all multicol negative variables and passed the assumption test
+
+
+```{r}
+summary(model_ori)
+```
+
+# Result 
+- Model Original (lm(formula = `Financial Freedom` ~ `Investment Freedom` + `Business Freedom` +`Trade Freedom` + `MOnetary Freedom` + `Labor Freedom`, data = freedom))
+the original model that uses all the index freedom variables, has a significant value of r square adjustment which is at 0.7043. Test of this model test has also been carried out and shows harmony in all tests, the original model has been in accordance with the statistics that have passed the test both in the test linarity, multilinearity, shapiro test and homoschedaticity test.
+
+- Model Recommendation (lm(formula = `Financial Freedom` ~ `Investment Freedom` + `Business Freedom` +`Trade Freedom`, data = freedom))
+in the recommendation model, the `step` function simplifies the original model by removing 2 variables that have a non-significant correlation coefficient on financial freedom. adjusted r squared results obtained also increased higher than the original model. but when testing the recommendation model does not pass the Shapiro test, this shows that there are abnormalities in the linear correlation of recommendation models
+
+Based on this test, we decided to recommend the use of original models or models that use all the freedom index variables as predictors of financial freedom.
