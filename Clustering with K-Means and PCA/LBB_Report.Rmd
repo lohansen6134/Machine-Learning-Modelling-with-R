@@ -1,0 +1,147 @@
+---
+title: "World Economic Analysis"
+author: "Lohansen"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+---
+
+# Brief 
+Data : Economic Freedom of the World
+Role : Government Urban Data Analyst
+Target : mengetahui faktor-faktor apa saja yang mempengaruhi index economic freedom suatu negara, dan melakukan clustering/pengelompokan pada negara-negara yang memiliki kesamaan
+Source : https://www.kaggle.com/gsutters/economic-freedom/downloads/economic-freedom.zip/1
+
+Data Introduction
+Indeks yang diterbitkan dalam Kebebasan Ekonomi Dunia oleh Fraser Institute mengukur sejauh mana kebijakan dan lembaga negara mendukung kebebasan ekonomi. Landasan kebebasan ekonomi adalah pilihan pribadi, pertukaran sukarela, kebebasan untuk memasuki pasar dan bersaing, dan keamanan orang dan properti yang dimiliki secara pribadi. Empat puluh dua titik data digunakan untuk membuat ringkasan indeks dan untuk mengukur tingkat kebebasan ekonomi di lima area pemerintahan luas.
+
+Berikut pembagian Area ukuran indeks ini
+- Area 1: Ukuran Pemerintah - Seiring pengeluaran pemerintah, perpajakan, dan ukuran perusahaan yang dikendalikan pemerintah meningkat, pengambilan keputusan pemerintah digantikan dengan pilihan individu dan kebebasan ekonomi berkurang.
+
+- Area 2: Sistem Hukum dan Hak Milik - Perlindungan orang dan properti yang diperoleh secara sah merupakan elemen sentral dari kebebasan ekonomi dan masyarakat sipil. Memang, itu adalah fungsi pemerintah yang paling penting.
+
+- Area 3: Uang Sehat - Inflasi mengikis nilai upah dan tabungan yang seharusnya diperoleh. Uang yang sehat sangat penting untuk melindungi hak milik. Ketika inflasi tidak hanya tinggi tetapi juga mudah berubah, menjadi sulit bagi individu untuk merencanakan masa depan dan dengan demikian menggunakan kebebasan ekonomi secara efektif.
+
+- Area 4: Kebebasan Berdagang Secara Internasional - Kebebasan untuk bertukar — dalam arti luas, membeli, menjual, membuat kontrak, dan sebagainya — sangat penting bagi kebebasan ekonomi, yang berkurang ketika kebebasan bertukar tidak termasuk bisnis dan individu di negara lain .
+
+- Area 5: Regulasi - Pemerintah tidak hanya menggunakan sejumlah alat untuk membatasi hak untuk bertukar internasional, mereka juga dapat mengembangkan peraturan yang memberatkan, membatasi hak untuk bertukar, mendapatkan kredit, mempekerjakan atau bekerja sesuai keinginan Anda, atau secara bebas mengoperasikan bisnis Anda .
+
+
+# Library 
+```{r}
+library(dplyr)
+library(tidyverse)
+library(FactoMineR)
+```
+
+# Data Exploratory
+Read Data
+```{r}
+economic <- read.csv("efw_cc.csv")
+```
+
+Preparing the data for K-Means Clustering
+```{r}
+economic.2016 <- economic %>% 
+  filter(year == "2016") %>% 
+  select(-c(ISO_code, rank, year, quartile, ECONOMIC.FREEDOM))
+
+name <- sub(pattern = "X", replacement = "", x = colnames(economic.2016))
+name <- sub(pattern = "\\d", replacement = "", x = name)
+name <- sub(pattern = "_", replacement = "", x = name)
+name <- sub(pattern = "\\w", replacement = "", x = name)
+colnames(economic.2016) <- name
+economic.2016 <- data.frame(economic.2016, row.names = 1)
+
+economic.2016 <- economic.2016 %>% 
+  select(-c( integrity_legal_system, reliability_police, transfers, protection_property_rights, business_costs_crime, judicial_independence, restrictions_sale_real_property, tariffs, black_market, judicial_independence, impartial_courts, ize_government, control_movement_capital_ppl, egulation, business_reg, labor_market_reg, credit_market_reg, ound_money))
+```
+
+checking NA
+```{r}
+colSums(is.na(economic.2016))
+```
+
+drop NA
+```{r}
+economic.2016 <- economic.2016 %>% 
+  select(-gov_enterprises)
+```
+
+
+# Modelling
+
+### K-Means + PCA
+K-Means Modelling
+```{r}
+wss <- function(data, maxCluster = 9) {
+    # Initialize within sum of squares
+    SSw <- (nrow(data) - 1) * sum(apply(data, 2, var))
+    SSw <- vector()
+    set.seed(100)
+    for (i in 2:maxCluster) {
+        SSw[i] <- sum(kmeans(data, centers = i)$withinss)
+    }
+    plot(1:maxCluster, SSw, type = "o", xlab = "Number of Clusters", ylab = "Within groups sum of squares", pch=19)
+}
+```
+
+```{r}
+# set.seed(100)
+economic.2016.s <- scale(economic.2016)
+wss(economic.2016.s)
+```
+
+Note :
+Berdasarkan plot diatas say amengambil kesimpulan bahwa elbow point atau titik perpotongan  berada di titik no.4 
+
+K = 4
+```{r}
+set.seed(100)
+economic.km <- kmeans(economic.2016, 4)
+```
+
+PCA
+```{r}
+economic.2016.new <- economic.2016
+economic.2016.new$cluster <- as.factor(economic.km$cluster)
+```
+
+```{r}
+economic.pca<-PCA(economic.2016.s, graph = F)
+plot(economic.pca, choix=c("ind"), label="none", col.ind=economic.2016.new$cluster)
+legend("topright", levels(economic.2016.new$clust), pch=19, col=1:4)
+```
+
+```{r}
+plot(economic.pca, cex=0.6, choix="var", col.ind=economic.2016.new$cluster)
+```
+
+Interpretasi :
+- Individual plot : negara di cluster 1 cenderung memiliki tingkat gov consumption yang tinggi
+- Individual plot : negara di cluster 5 cenderung memiliki freedom own foreign currency yang baik
+- Individual plot : negara di cluster 1 dan 3 cenderung memiliki kesamaan di bidang inflation dan trade
+- variable plot : negara yang memiliki tingkat freedom own foreign currency tinggi cenderung memiliki government consumption yang rendah, karena korelasi diantara keduanya -1 (berbanding terbalik)
+- variable plot : inflation tidak memiliki pengaruh terhadap government consumption dan freedom own foreign currency karena korelasi 0 (tegak lurus)
+- variable plot : trade, regulatory trade barriers, dan property rights banyak terangkum di PC1
+
+
+# Basic PCA (Prcomp)
+```{r}
+economic.pca2 <- prcomp(economic.2016)
+summary(economic.pca2)
+```
+
+```{r}
+source("biplot.R")
+fancy_biplot(economic.pca2)
+```
+
+Interpretasi :
+- negara-negara di cluster kanan atas memiliki kemiripan di bidang freedom own forign yang tinggi
+- negara-negara di cluster kiris bawah memiliki freedom own forign yang rendah karena berlawanan arah 
+- Negara Libta memiliki tingkat freedom own foreign yang cukup tinggi
+- Negara Sweden dan Greece memiliki tingkat military interfence yang cukup tinggi
+
